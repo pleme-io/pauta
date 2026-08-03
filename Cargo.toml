@@ -37,7 +37,13 @@ repository = "https://github.com/pleme-io/pauta"
 # from ONE (defpautaaction) catalog rather than three hand-written lists.
 pauta-spec = { path = "pauta-spec", version = "0.1" }
 # The typed review surface. pauta owns no GitHub knowledge of its own.
-metsuke = { path = "../metsuke", version = "0.1" }
+# A plain version, NOT `{ path = "../metsuke" }`. That path resolves only on
+# a workstation where both repos happen to sit side by side; on CI only pauta
+# is checked out, so `ship` died with "failed to read
+# /home/runner/work/pauta/metsuke/Cargo.toml". cargo strips `path` when
+# publishing, so the manifest looked publishable — but the dep must still
+# RESOLVE to build, and it cannot. metsuke 0.1.1 is on crates.io.
+metsuke = "0.1"
 # Widget STATE (TableView, DiffView, TextArea, KeyMap) — named directly
 # because pauta uses the models far more than the renderer's re-exports.
 egaku = "0.1"
