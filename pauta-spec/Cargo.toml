@@ -1,12 +1,12 @@
 [package]
 name = "pauta-spec"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.89.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "pauta-spec — the (defpautaaction) authoring surface: pauta's action vocabulary as tatara-lisp, from which the keymap, the legend and the --help are all derived so they cannot drift."
 homepage = "https://github.com/pleme-io/pauta"
 repository = "https://github.com/pleme-io/pauta"
-license = "MIT"
+license.workspace = true
 categories = ["development-tools"]
 keywords = ["tatara", "tui", "code-review", "pleme-io", "pauta"]
 

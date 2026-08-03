@@ -1,14 +1,14 @@
 [package]
 name = "pauta"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.89.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "pauta — the PR-review quadro. Your docket: every pull request set down for your judgment, in order. Reads through metsuke, renders diffs with egaku, refreshes itself off the app task (QUADRO T14), and gates a binding verdict behind two keystrokes."
 homepage = "https://github.com/pleme-io/pauta"
 repository = "https://github.com/pleme-io/pauta"
 documentation = "https://docs.rs/pauta"
 readme = "README.md"
-license = "MIT"
+license.workspace = true
 categories = ["command-line-utilities", "development-tools"]
 keywords = ["tui", "github", "code-review", "pull-request", "pleme-io"]
 
@@ -20,6 +20,17 @@ module_name_repetitions = "allow"
 
 [workspace]
 members = ["pauta-spec"]
+
+# The shared version the workspace release flow bumps. Without this,
+# `rust-auto-release.yml`'s bump job dies on
+# `workspace.package.version not found` and `ship` never runs — pauta's
+# first two releases failed exactly there. Same shape as banken and tear.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+license = "MIT"
+repository = "https://github.com/pleme-io/pauta"
 
 [dependencies]
 # The authored action vocabulary — the keymap, legend and --help all derive
