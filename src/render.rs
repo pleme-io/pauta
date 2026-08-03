@@ -102,7 +102,7 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
             s.push_str("  [feed FAULTED — rows are stale]");
         }
         s.push_str("  ");
-        s.push_str(&crate::keys::legend_parts().join(" "));
+        s.push_str(&crate::keys::legend_parts(self.catalog()).join(" "));
         f.set_stringn(0, h.saturating_sub(1), &s, w, Style::default());
     }
 }

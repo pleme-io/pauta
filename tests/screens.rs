@@ -51,12 +51,13 @@ fn app_with(prs: Vec<PrSummary>) -> PautaApp<MockForge, MockForge> {
     for p in prs {
         forge = forge.with_pr(p);
     }
-    let mut app = PautaApp::new(
+    let mut app = PautaApp::try_new(
         forge,
         MockForge::new(),
         Involvement::ReviewRequested,
         "source: mock",
-    );
+    )
+    .expect("the shipped catalog must compile");
     app.refresh().expect("the mock must answer");
     app
 }
@@ -183,6 +184,17 @@ fn cancelling_a_staged_verdict_submits_nothing_and_returns_to_the_docket() {
 fn only_a_confirm_after_a_stage_reaches_the_forge() {
     let mut app = app_with(vec![pr(7, "a change", false)]);
     app.dispatch(Action::Approve);
+    // The intermediate assertion is what makes the test's NAME true. Without
+    // it this passed even with `approve` authored `:gate free` — stage would
+    // submit immediately, the final count would still be 1, and a test called
+    // "only a confirm reaches the forge" would be green while a single
+    // keystroke reached the forge. Found by flipping the catalog and watching
+    // which tests actually went red.
+    assert_eq!(
+        app.review_env().submitted_count(),
+        0,
+        "the first keystroke must not reach the forge"
+    );
     app.dispatch(Action::Confirm);
 
     let submitted = app.review_env().submitted.borrow();
@@ -241,12 +253,13 @@ fn opening_a_diff_renders_the_patch_lines() {
             patch: Some("@@ -1,2 +1,2 @@\n-old line\n+new line\n context\n".into()),
         },
     );
-    let mut app = PautaApp::new(
+    let mut app = PautaApp::try_new(
         forge,
         MockForge::new(),
         Involvement::ReviewRequested,
         "source: mock",
-    );
+    )
+    .expect("the shipped catalog must compile");
     app.refresh().unwrap();
     app.dispatch(Action::OpenDiff);
     assert!(matches!(app.panel(), Panel::Diff(_)));
@@ -281,12 +294,13 @@ fn a_binary_file_says_so_instead_of_rendering_as_unchanged() {
                 patch: None,
             },
         );
-    let mut app = PautaApp::new(
+    let mut app = PautaApp::try_new(
         forge,
         MockForge::new(),
         Involvement::ReviewRequested,
         "source: mock",
-    );
+    )
+    .expect("the shipped catalog must compile");
     app.refresh().unwrap();
     app.dispatch(Action::OpenDiff);
     let b = draw(&app, 100, 12);
@@ -304,12 +318,13 @@ fn a_forge_error_becomes_a_readable_message_not_a_panic() {
             detail: "gh auth login".into(),
         },
     );
-    let mut app = PautaApp::new(
+    let mut app = PautaApp::try_new(
         forge,
         MockForge::new(),
         Involvement::ReviewRequested,
         "source: mock",
-    );
+    )
+    .expect("the shipped catalog must compile");
     // The refresh itself fails; the app must survive it.
     assert!(app.refresh().is_err());
     app.dispatch(Action::OpenDiff);
@@ -380,12 +395,13 @@ async fn the_docket_grows_without_a_keystroke() {
     let forge: Arc<GrowingForge> = Arc::new(GrowingForge {
         calls: std::sync::atomic::AtomicUsize::new(0),
     });
-    let mut app: PautaApp<GrowingForge, MockForge> = PautaApp::new(
+    let mut app: PautaApp<GrowingForge, MockForge> = PautaApp::try_new(
         forge,
         MockForge::new(),
         Involvement::ReviewRequested,
         "source: growing",
     )
+    .expect("the shipped catalog must compile")
     .with_feed(std::time::Duration::from_millis(20));
 
     let before = app.board().len();

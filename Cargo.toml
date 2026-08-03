@@ -18,7 +18,13 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 module_name_repetitions = "allow"
 
+[workspace]
+members = ["pauta-spec"]
+
 [dependencies]
+# The authored action vocabulary — the keymap, legend and --help all derive
+# from ONE (defpautaaction) catalog rather than three hand-written lists.
+pauta-spec = { path = "pauta-spec", version = "0.1" }
 # The typed review surface. pauta owns no GitHub knowledge of its own.
 metsuke = { path = "../metsuke", version = "0.1" }
 # Widget STATE (TableView, DiffView, TextArea, KeyMap) — named directly

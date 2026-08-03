@@ -32,12 +32,22 @@
 //! ## Tier honesty
 //!
 //! **Shipped:** the docket model, the live plane, the verdict gate, the diff
-//! panel, the keymap and its drift gates — all unit-tested with no network.
-//! **Not yet:** a tatara-lisp authored catalog (banken's `(defbancada)` /
-//! `(defview)` surface), so the keymap is a Rust table held to `Action::ALL`
-//! by a test rather than derived from an authored spec. `pending-pauta:
-//! catalog`. **Not measured:** a live GitHub run, inherited from
-//! `pending-metsuke: live-read`.
+//! panel, and the authored `(defpautaaction)` catalog that the keymap, the
+//! legend and the gate are all DERIVED from. 36 tests, no network.
+//!
+//! `pending-pauta: catalog` is **closed** for the action vocabulary — see
+//! [`pauta_spec`]. The gate is verified non-vacuously: authoring `approve`
+//! as `:gate free` turns three tests red, including the one whose name
+//! promises only a confirm reaches the forge.
+//!
+//! Still authored in Rust, not lisp: the column set and the sort default.
+//! Those want a `(defpautaview)` and it is not built. `pending-pauta:
+//! view-catalog`.
+//!
+//! The read path is proven live through metsuke (`pending-metsuke:
+//! live-read` closed 2026-08-03). The WRITE path is not — nobody should
+//! approve a real pull request to satisfy a test suite, so `submit_review`
+//! is exercised against `MockForge` only.
 
 #![forbid(unsafe_code)]
 
@@ -50,3 +60,4 @@ pub mod render;
 pub use app::{Action, Panel, PautaApp};
 pub use board::{Board, PrRow};
 pub use feed::PrFeed;
+pub use pauta_spec::{Catalog, Effect, Gate};

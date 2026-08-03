@@ -1,51 +1,45 @@
-//! The keymap.
+//! The keymap and the legend — both DERIVED from the authored catalog.
 //!
-//! One table, and a test that holds it to [`Action::ALL`]. The derive that
-//! would make the list mechanical (`AllVariants`) is unit-only and pauta's
-//! action enum is unit-only *for that reason* — but the binding table itself
-//! still has to be authored, so the gate is a test rather than a type.
+//! There is no binding table in this file, and that is the point. It
+//! previously held a `const BINDINGS: &[(&str, Action)]` plus a test holding
+//! it to `Action::ALL` — which caught an unbound action and could not catch
+//! the legend drifting from the runtime, because they were two hand-written
+//! lists. banken hit exactly that: its legend advertised `S` for a chord the
+//! runtime bound as `shift+s`.
+//!
+//! Now `pauta-spec`'s `(defpautaaction)` catalog is the single source, and
+//! the keymap, the legend and the gate all read from it.
 
 use egaku::{KeyCombo, KeyMap};
+use pauta_spec::{Catalog, Effect, Gate};
 
-use crate::app::Action;
-
-/// Every binding, in the order the legend shows them (most important first).
-pub const BINDINGS: &[(&str, Action)] = &[
-    ("j", Action::SelectNext),
-    ("k", Action::SelectPrev),
-    ("enter", Action::OpenDiff),
-    ("esc", Action::CloseDiff),
-    ("s", Action::ToggleDiffMode),
-    ("tab", Action::CycleLane),
-    ("a", Action::Approve),
-    ("r", Action::RequestChanges),
-    ("y", Action::Confirm),
-    ("n", Action::Cancel),
-    ("q", Action::Quit),
-];
-
-/// Build the keymap.
+/// Build the keymap from the authored catalog.
 #[must_use]
-pub fn keymap() -> KeyMap<Action> {
+pub fn keymap(catalog: &Catalog) -> KeyMap<Effect> {
     let mut m = KeyMap::new();
-    for (k, a) in BINDINGS {
-        m.bind(KeyCombo::key(k), *a);
+    for a in catalog.actions() {
+        m.bind(KeyCombo::key(&a.binding), a.effect);
     }
     m
 }
 
-/// The legend, most important first — derived from [`BINDINGS`] so it cannot
-/// advertise a chord the runtime does not bind. banken's hand-written legend
-/// drifted into promising `S` for a chord bound as `shift+s`; deriving it is
-/// the fix, and this is the same fix applied before the drift happens.
+/// The legend, in authored order — most important first.
+///
+/// Derived, so it cannot advertise a chord the runtime does not bind. A gated
+/// action is marked with `!`, because "this one will ask you to confirm" is
+/// exactly what an operator wants to know *before* pressing it.
 #[must_use]
-pub fn legend_parts() -> Vec<String> {
-    BINDINGS
+pub fn legend_parts(catalog: &Catalog) -> Vec<String> {
+    catalog
+        .actions()
         .iter()
-        .map(|(k, a)| {
-            let mut s = String::from(*k);
+        .map(|a| {
+            let mut s = String::from(&a.binding);
             s.push(':');
-            s.push_str(a.slug());
+            s.push_str(&a.name);
+            if a.gate == Gate::Binding {
+                s.push('!');
+            }
             s
         })
         .collect()
@@ -55,62 +49,62 @@ pub fn legend_parts() -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn catalog() -> Catalog {
+        Catalog::load().expect("the shipped vocabulary must compile")
+    }
+
     #[test]
-    fn every_binding_reaches_the_map() {
-        let m = keymap();
+    fn every_authored_action_reaches_the_keymap() {
+        let c = catalog();
+        let m = keymap(&c);
         assert_eq!(
             m.len(),
-            BINDINGS.len(),
-            "a chord was swallowed on the way into the keymap"
+            c.actions().len(),
+            "a chord was swallowed between the catalog and the keymap"
+        );
+        for a in c.actions() {
+            assert_eq!(
+                m.lookup(&KeyCombo::key(&a.binding)),
+                Some(&a.effect),
+                "chord `{}` did not resolve to its authored effect",
+                a.binding
+            );
+        }
+    }
+
+    /// The drift this file exists to prevent: the legend must describe
+    /// exactly what the keymap binds, because both come from one list.
+    #[test]
+    fn the_legend_describes_exactly_what_is_bound() {
+        let c = catalog();
+        let legend = legend_parts(&c);
+        assert_eq!(legend.len(), c.actions().len());
+        for (part, action) in legend.iter().zip(c.actions()) {
+            let mut want = String::from(&action.binding);
+            want.push(':');
+            assert!(
+                part.starts_with(&want),
+                "legend entry {part:?} does not name the chord it is bound to"
+            );
+        }
+    }
+
+    #[test]
+    fn the_legend_marks_the_gated_actions() {
+        let c = catalog();
+        let legend = legend_parts(&c);
+        let marked: Vec<&String> = legend.iter().filter(|p| p.ends_with('!')).collect();
+        assert_eq!(
+            marked.len(),
+            2,
+            "approve and request-changes must be visibly marked as gated: {legend:?}"
         );
     }
 
-    /// The gate that replaces the derive. If an `Action` variant is added and
-    /// never bound, this fails — which is the drift `AllVariants` would have
-    /// caught if it could be used on this enum.
     #[test]
-    fn every_action_is_bound() {
-        let bound: Vec<Action> = BINDINGS.iter().map(|(_, a)| *a).collect();
-        for a in Action::ALL {
-            assert!(
-                bound.contains(a),
-                "Action::{} has no key binding — unreachable from the keyboard",
-                a.slug()
-            );
-        }
-    }
-
-    #[test]
-    fn no_chord_is_bound_twice() {
-        let mut seen = std::collections::BTreeSet::new();
-        for (k, _) in BINDINGS {
-            assert!(
-                seen.insert(*k),
-                "chord `{k}` is bound twice — the second wins silently"
-            );
-        }
-    }
-
-    #[test]
-    fn no_two_actions_share_a_slug() {
-        let mut seen = std::collections::BTreeSet::new();
-        for a in Action::ALL {
-            assert!(seen.insert(a.slug()), "slug `{}` is used twice", a.slug());
-        }
-        assert_eq!(seen.len(), Action::ALL.len());
-    }
-
-    #[test]
-    fn the_keymap_resolves_a_chord_to_its_action() {
-        let m = keymap();
-        let combo = KeyCombo::key("a");
-        assert_eq!(m.lookup(&combo), Some(&Action::Approve));
-    }
-
-    #[test]
-    fn the_legend_advertises_exactly_what_is_bound() {
-        let legend = legend_parts();
-        assert_eq!(legend.len(), BINDINGS.len());
-        assert!(legend[0].starts_with("j:"), "legend order follows BINDINGS");
+    fn the_gate_comes_from_the_catalog() {
+        let c = catalog();
+        assert!(c.is_binding(Effect::Approve));
+        assert!(!c.is_binding(Effect::SelectNext));
     }
 }

@@ -12,68 +12,17 @@ use std::sync::Arc;
 
 use egaku::{DiffView, KeyMap};
 use metsuke::{Forge, ForgeReview, Involvement, PrSummary, Verdict};
+use pauta_spec::{Catalog, Effect};
 
 use crate::board::Board;
 use crate::feed::PrFeed;
 
-/// What the operator can ask for.
+/// The runtime's action type IS the catalog's [`Effect`].
 ///
-/// Deliberately unit-only. `#[derive(KindStr, AllVariants)]` is UNIT-ONLY
-/// (`tatara-rust-derive/src/enum_fold.rs:138`), and a payload-carrying action
-/// cannot compile with them — so the target of an action is read from the
-/// cursor at dispatch time rather than baked into the variant. That keeps the
-/// enum derivable later without a rewrite.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
-    SelectNext,
-    SelectPrev,
-    OpenDiff,
-    CloseDiff,
-    ToggleDiffMode,
-    CycleLane,
-    Approve,
-    RequestChanges,
-    Confirm,
-    Cancel,
-    Quit,
-}
-
-impl Action {
-    /// Every variant, hand-listed exactly once and then TESTED against the
-    /// keymap, because the derive cannot be used here (see the enum's note).
-    /// A hand list nobody checks is the drift this fleet keeps finding; a
-    /// hand list a test holds to the keymap is merely a hand list.
-    pub const ALL: &'static [Action] = &[
-        Action::SelectNext,
-        Action::SelectPrev,
-        Action::OpenDiff,
-        Action::CloseDiff,
-        Action::ToggleDiffMode,
-        Action::CycleLane,
-        Action::Approve,
-        Action::RequestChanges,
-        Action::Confirm,
-        Action::Cancel,
-        Action::Quit,
-    ];
-
-    #[must_use]
-    pub fn slug(self) -> &'static str {
-        match self {
-            Self::SelectNext => "select-next",
-            Self::SelectPrev => "select-prev",
-            Self::OpenDiff => "open-diff",
-            Self::CloseDiff => "close-diff",
-            Self::ToggleDiffMode => "toggle-diff-mode",
-            Self::CycleLane => "cycle-lane",
-            Self::Approve => "approve",
-            Self::RequestChanges => "request-changes",
-            Self::Confirm => "confirm",
-            Self::Cancel => "cancel",
-            Self::Quit => "quit",
-        }
-    }
-}
+/// There is no second enum here. pauta previously declared its own `Action`
+/// with a hand-written `ALL` and a test holding the keymap to it; the catalog
+/// makes that list authored instead, so the alias is all that remains.
+pub type Action = Effect;
 
 /// Exactly one of these is on screen.
 pub enum Panel {
@@ -98,7 +47,8 @@ pub struct PautaApp<F: Forge, R: ForgeReview> {
     review: R,
     board: Board,
     panel: Panel,
-    keys: KeyMap<Action>,
+    catalog: Catalog,
+    keys: KeyMap<Effect>,
     done: bool,
     feed: Option<PrFeed>,
     /// A short label naming where the rows came from — tier honesty in the UI
@@ -108,23 +58,35 @@ pub struct PautaApp<F: Forge, R: ForgeReview> {
 
 impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
     /// Build the app over a forge and a review sink.
-    #[must_use]
-    pub fn new(
+    /// # Errors
+    /// [`pauta_spec::SpecError`] when the authored catalog fails to compile
+    /// or is self-inconsistent. Fallible on purpose: the keymap and the
+    /// legend come from that catalog, and falling back to hardcoded chords
+    /// would put the operator on a keyboard the legend does not describe.
+    pub fn try_new(
         forge: impl Into<Arc<F>>,
         review: R,
         lane: Involvement,
         source_label: impl Into<String>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, pauta_spec::SpecError> {
+        let catalog = Catalog::load()?;
+        Ok(Self {
             forge: forge.into(),
             review,
             board: Board::new(lane),
             panel: Panel::Board,
-            keys: crate::keys::keymap(),
+            keys: crate::keys::keymap(&catalog),
+            catalog,
             done: false,
             feed: None,
             source_label: source_label.into(),
-        }
+        })
+    }
+
+    /// The authored catalog — the renderer reads the legend from it.
+    #[must_use]
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
     }
 
     /// Attach the T14 live plane. Opt-in and builder-style: an app without a
@@ -166,7 +128,7 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
     }
 
     #[must_use]
-    pub fn keymap(&self) -> &KeyMap<Action> {
+    pub fn keymap(&self) -> &KeyMap<Effect> {
         &self.keys
     }
 
@@ -214,8 +176,13 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
             Action::OpenDiff => self.open_diff(),
             Action::CloseDiff => self.panel = Panel::Board,
             Action::ToggleDiffMode => self.toggle_diff_mode(),
-            Action::Approve => self.stage(Verdict::Approve(String::new())),
-            Action::RequestChanges => self.stage(Verdict::RequestChanges(String::new())),
+            Action::Approve => self.stage(Effect::Approve, Verdict::Approve(String::new())),
+            Action::RequestChanges => {
+                self.stage(
+                    Effect::RequestChanges,
+                    Verdict::RequestChanges(String::new()),
+                );
+            }
             Action::Confirm => self.commit_pending(),
             Action::Cancel => self.panel = Panel::Board,
         }
@@ -285,16 +252,22 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
         }
     }
 
-    /// Stage a binding verdict for confirmation. Never submits.
-    fn stage(&mut self, verdict: Verdict) {
+    /// Stage a verdict for confirmation. Never submits.
+    ///
+    /// The gate is read from the AUTHORED catalog rather than decided here,
+    /// so the runtime cannot disagree with what `(defpautaaction)` declares.
+    /// If an effect were ever authored `:gate free`, it would submit straight
+    /// through — which is why `pauta-spec` has no way to author a verdict
+    /// that way.
+    fn stage(&mut self, effect: Effect, verdict: Verdict) {
         let Some(pr) = self.board.selected().cloned() else {
             return;
         };
-        debug_assert!(
-            verdict.is_binding(),
-            "only a binding verdict needs the two-keystroke gate"
-        );
-        self.panel = Panel::Pending { pr, verdict };
+        if self.catalog.is_binding(effect) {
+            self.panel = Panel::Pending { pr, verdict };
+        } else {
+            self.submit(&pr.repo.clone(), pr.number, &verdict);
+        }
     }
 
     /// Commit the staged verdict. The ONLY path that reaches
@@ -309,10 +282,15 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
         };
         let (repo, number) = (pr.repo.clone(), pr.number);
         let v = verdict.clone();
-        self.panel = match self.review.submit_review(&repo, number, &v) {
+        self.submit(&repo, number, &v);
+    }
+
+    /// Submit and report. The ONLY caller of [`ForgeReview::submit_review`].
+    fn submit(&mut self, repo: &metsuke::RepoId, number: metsuke::PrNumber, v: &Verdict) {
+        self.panel = match self.review.submit_review(repo, number, v) {
             Ok(()) => {
                 let mut m = String::from("submitted ");
-                m.push_str(match v {
+                m.push_str(match *v {
                     Verdict::Approve(_) => "approval",
                     Verdict::RequestChanges(_) => "request-changes",
                     Verdict::Comment(_) => "comment",

@@ -1,0 +1,24 @@
+[package]
+name = "pauta-spec"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+description = "pauta-spec — the (defpautaaction) authoring surface: pauta's action vocabulary as tatara-lisp, from which the keymap, the legend and the --help are all derived so they cannot drift."
+homepage = "https://github.com/pleme-io/pauta"
+repository = "https://github.com/pleme-io/pauta"
+license = "MIT"
+categories = ["development-tools"]
+keywords = ["tatara", "tui", "code-review", "pleme-io", "pauta"]
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[dependencies]
+# ONE dep, not two: the derive macros arrive RENAMED through
+# `tatara_lisp::DeriveTataraDomain`, so `tatara-lisp-derive` is never named
+# here (banken's manifest makes the same point).
+tatara-lisp = "0.3.3"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
