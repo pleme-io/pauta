@@ -38,6 +38,11 @@ egaku-term = { git = "https://github.com/pleme-io/egaku-term", rev = "04539db", 
 # fleet's blocking-read-on-a-cadence loop. Deliberately NOT izumi::Engine,
 # whose subprocess Environment cannot express a typed client call.
 izumi = { git = "https://github.com/pleme-io/izumi", rev = "50ab0f6", version = "0.1" }
+# The session archetype's output types. praca owns the multi-pane plan +
+# `instantiate`; pauta only builds a definition and hands it over — there is
+# deliberately NO second pane-making mechanism here.
+praca = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
+tear-types = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [profile.release]
@@ -45,3 +50,9 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
+
+[dev-dependencies]
+# praça's recording MultiplexerControl double, so the archetype can be driven
+# through the REAL `instantiate` rather than only validated. Opt-in feature,
+# dev-only — nothing ships a fake multiplexer.
+praca = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1", features = ["testing"] }

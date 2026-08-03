@@ -52,6 +52,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod archetype;
 pub mod board;
 pub mod feed;
 pub mod keys;
