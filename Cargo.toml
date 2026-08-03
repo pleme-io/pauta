@@ -1,0 +1,41 @@
+[package]
+name = "pauta"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+description = "pauta — the PR-review quadro. Your docket: every pull request set down for your judgment, in order. Reads through metsuke, renders diffs with egaku, refreshes itself off the app task (QUADRO T14), and gates a binding verdict behind two keystrokes."
+homepage = "https://github.com/pleme-io/pauta"
+repository = "https://github.com/pleme-io/pauta"
+documentation = "https://docs.rs/pauta"
+readme = "README.md"
+license = "MIT"
+categories = ["command-line-utilities", "development-tools"]
+keywords = ["tui", "github", "code-review", "pull-request", "pleme-io"]
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
+[dependencies]
+# The typed review surface. pauta owns no GitHub knowledge of its own.
+metsuke = { path = "../metsuke", version = "0.1" }
+# Widget STATE (TableView, DiffView, TextArea, KeyMap) — named directly
+# because pauta uses the models far more than the renderer's re-exports.
+egaku = { git = "https://github.com/pleme-io/egaku", version = "0.1" }
+# The cell renderer + AsyncApp runtime. git+rev, not a version: egaku-term's
+# auto-release has been failing since 0.3.2 so crates.io serves 0.3.1, which
+# predates `AsyncApp::wake` — the arm the T14 live plane is built on.
+egaku-term = { git = "https://github.com/pleme-io/egaku-term", rev = "04539db", version = "0.3", features = ["tokio"] }
+# ONE piece of izumi: refresh::{LiveStore, spawn_interval_refresh} — the
+# fleet's blocking-read-on-a-cadence loop. Deliberately NOT izumi::Engine,
+# whose subprocess Environment cannot express a typed client call.
+izumi = { git = "https://github.com/pleme-io/izumi", rev = "50ab0f6", version = "0.1" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true
