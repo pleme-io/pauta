@@ -42,13 +42,8 @@ izumi = "0.1"
 # The session archetype's output types. praca owns the multi-pane plan +
 # `instantiate`; pauta only builds a definition and hands it over — there is
 # deliberately NO second pane-making mechanism here.
-praca = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
-# Still git+rev, and NOT by preference: the published tear-types 0.1.8
-# predates `layout::SplitRatio` being reachable, so `= "0.1"` fails to
-# compile. Swaps to a version the moment tear's release publishes a
-# tear-types carrying it — same release that gives praca its `testing`
-# feature, so both lines move together.
-tear-types = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
+praca = "0.1.9"
+tear-types = "0.1.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [profile.release]
@@ -61,4 +56,4 @@ strip = true
 # praça's recording MultiplexerControl double, so the archetype can be driven
 # through the REAL `instantiate` rather than only validated. Opt-in feature,
 # dev-only — nothing ships a fake multiplexer.
-praca = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1", features = ["testing"] }
+praca = { version = "0.1.9", features = ["testing"] }
