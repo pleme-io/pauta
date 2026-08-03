@@ -29,7 +29,7 @@ pauta-spec = { path = "pauta-spec", version = "0.1" }
 metsuke = { path = "../metsuke", version = "0.1" }
 # Widget STATE (TableView, DiffView, TextArea, KeyMap) — named directly
 # because pauta uses the models far more than the renderer's re-exports.
-egaku = { git = "https://github.com/pleme-io/egaku", version = "0.1" }
+egaku = "0.1"
 # The cell renderer + AsyncApp runtime. git+rev, not a version: egaku-term's
 # auto-release has been failing since 0.3.2 so crates.io serves 0.3.1, which
 # predates `AsyncApp::wake` — the arm the T14 live plane is built on.
@@ -37,11 +37,16 @@ egaku-term = { git = "https://github.com/pleme-io/egaku-term", rev = "04539db", 
 # ONE piece of izumi: refresh::{LiveStore, spawn_interval_refresh} — the
 # fleet's blocking-read-on-a-cadence loop. Deliberately NOT izumi::Engine,
 # whose subprocess Environment cannot express a typed client call.
-izumi = { git = "https://github.com/pleme-io/izumi", rev = "50ab0f6", version = "0.1" }
+izumi = "0.1"
 # The session archetype's output types. praca owns the multi-pane plan +
 # `instantiate`; pauta only builds a definition and hands it over — there is
 # deliberately NO second pane-making mechanism here.
 praca = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
+# Still git+rev, and NOT by preference: the published tear-types 0.1.8
+# predates `layout::SplitRatio` being reachable, so `= "0.1"` fails to
+# compile. Swaps to a version the moment tear's release publishes a
+# tear-types carrying it — same release that gives praca its `testing`
+# feature, so both lines move together.
 tear-types = { git = "https://github.com/pleme-io/tear", rev = "18deab2", version = "0.1" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 

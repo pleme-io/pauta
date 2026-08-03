@@ -1,0 +1,28 @@
+name: auto-release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        required: false
+        default: patch
+
+# NO `concurrency:` override here, deliberately. tear's shim carries the
+# scar: a `cancel-in-progress: true` override meant the bump job's own
+# release-commit push triggered a superseding run that cancelled the run
+# doing the actual publish — so the workspace bumped and tagged on every
+# push while NEVER shipping to crates.io. Conform to the canonical shim and
+# let the substrate govern.
+
+jobs:
+  release:
+    # `rust-auto-release.yml`, not `cargo-auto-release.yml`: pauta is a
+    # WORKSPACE (pauta + pauta-spec) and the members must publish in
+    # dependency order. The single-crate flow would ship only the root.
+    uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type || 'patch' }}
+    secrets: inherit
