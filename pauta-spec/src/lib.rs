@@ -138,6 +138,9 @@ impl Catalog {
         if actions.is_empty() {
             return Err(SpecError::Invalid("the catalog declares no actions".into()));
         }
+        for a in &actions {
+            validate_binding(&a.name, &a.binding)?;
+        }
         dup_check(actions.iter().map(|a| a.name.as_str()), "name")?;
         dup_check(actions.iter().map(|a| a.binding.as_str()), "binding")?;
         let mut effects: Vec<Effect> = actions.iter().map(|a| a.effect).collect();
@@ -172,6 +175,66 @@ impl Catalog {
             .iter()
             .any(|a| a.effect == effect && a.gate == Gate::Binding)
     }
+}
+
+/// Reject a `:binding` that cannot possibly reach the runtime.
+///
+/// `keys::keymap` builds each entry with `egaku::KeyCombo::key(&binding)`,
+/// which stores the string as a **literal key name** and parses nothing. So a
+/// binding that is not exactly what `egaku_term` delivers for some keypress
+/// compiles, passes every duplicate check below, and then simply never fires.
+/// The failure mode is silence — no error, no log, just a dead key — which is
+/// the worst shape a config error can take.
+///
+/// Three ways to author one, all rejected here:
+///
+/// - **A modifier chord.** `"ctrl+s"` is one 6-character key name to
+///   `KeyCombo::key`, and no keypress is ever named that. Modified chords
+///   need `KeyCombo::new("s", vec!["ctrl".into()])`, which `:binding` has no
+///   way to express — so authoring one is always a mistake, not a feature
+///   this rejects.
+/// - **An uppercase letter.** `egaku_term` lowercases every character key and
+///   conveys the case as a `shift` modifier, so `"S"` is never delivered.
+/// - **Whitespace.** A two-key sequence (`"C-x e"`) is a chord, not a key
+///   name; `KeyMap` has no notion of a pending prefix.
+///
+/// This is a SHAPE check, deliberately not a vocabulary check. Enumerating
+/// every name `egaku_term` emits would put a second copy of that list here,
+/// in a crate that (by design — three dependencies) cannot see the first. The
+/// exhaustive check lives where egaku IS visible: `keys.rs`'s
+/// `every_authored_binding_is_reachable_by_a_real_keypress`, which drives real
+/// `KeyEvent`s through `egaku_term::event::from_key_event` and asserts each
+/// authored binding is something a keyboard can actually produce.
+fn validate_binding(name: &str, binding: &str) -> Result<(), SpecError> {
+    let bad = |why: &str| {
+        let mut m = String::from("action `");
+        m.push_str(name);
+        m.push_str("` has an unreachable binding `");
+        m.push_str(binding);
+        m.push_str("`: ");
+        m.push_str(why);
+        Err(SpecError::Invalid(m))
+    };
+
+    if binding.is_empty() {
+        return bad("a binding cannot be empty");
+    }
+    if binding.contains('+') {
+        return bad(
+            "modifier chords are not expressible — `KeyCombo::key` takes a literal key name, \
+             so this would never match a keypress",
+        );
+    }
+    if binding.chars().any(char::is_whitespace) {
+        return bad("multi-key sequences are not supported — one key name per action");
+    }
+    if binding.chars().any(|c| c.is_ascii_uppercase()) {
+        return bad(
+            "key names are delivered lowercase (case arrives as a `shift` modifier), \
+             so an uppercase name never matches",
+        );
+    }
+    Ok(())
 }
 
 fn dup_check<'a>(it: impl Iterator<Item = &'a str>, what: &str) -> Result<(), SpecError> {
@@ -241,6 +304,75 @@ mod tests {
     }
 
     // ── The gates, each shown red on a deliberately-broken catalog ──
+
+    #[test]
+    /// The landmine this validation exists for. Before it, this catalog
+    /// compiled, passed all three duplicate checks, and shipped a key that
+    /// silently never fired — `KeyCombo::key("ctrl+s")` is a literal
+    /// 6-character key name and no keypress is ever called that.
+    #[test]
+    fn a_modifier_chord_is_rejected_because_it_could_never_fire() {
+        let src = r#"
+(defpautaaction :name "stage" :binding "ctrl+s" :effect approve :gate binding)
+"#;
+        let e = Catalog::from_source(src).unwrap_err();
+        assert!(
+            matches!(&e, SpecError::Invalid(m) if m.contains("ctrl+s") && m.contains("modifier")),
+            "a modifier chord is unreachable through KeyCombo::key; got {e:?}"
+        );
+    }
+
+    #[test]
+    fn an_uppercase_binding_is_rejected() {
+        // egaku_term lowercases character keys and conveys case as a `shift`
+        // modifier, so "S" is delivered as ("s", [shift]) and an authored "S"
+        // never matches.
+        let src = r#"
+(defpautaaction :name "stage" :binding "S" :effect approve :gate binding)
+"#;
+        let e = Catalog::from_source(src).unwrap_err();
+        assert!(
+            matches!(&e, SpecError::Invalid(m) if m.contains("lowercase")),
+            "an uppercase key name is never delivered; got {e:?}"
+        );
+    }
+
+    #[test]
+    fn a_multi_key_sequence_is_rejected() {
+        let src = r#"
+(defpautaaction :name "stage" :binding "C-x e" :effect approve :gate binding)
+"#;
+        let e = Catalog::from_source(src).unwrap_err();
+        assert!(
+            matches!(&e, SpecError::Invalid(m) if m.contains("multi-key")),
+            "KeyMap has no pending-prefix state; got {e:?}"
+        );
+    }
+
+    #[test]
+    fn an_empty_binding_is_rejected() {
+        let src = r#"
+(defpautaaction :name "stage" :binding "" :effect approve :gate binding)
+"#;
+        let e = Catalog::from_source(src).unwrap_err();
+        assert!(matches!(&e, SpecError::Invalid(_)), "got {e:?}");
+    }
+
+    /// Non-vacuity: the rejections above must not be rejecting everything.
+    /// The canonical catalog — and every ordinary key shape — still loads.
+    #[test]
+    fn ordinary_bindings_still_pass_validation() {
+        assert!(Catalog::load().is_ok(), "the canonical catalog must load");
+        for b in ["j", "enter", "esc", "tab", "/", "?", "f1", "1", "-"] {
+            let mut src = String::from(r#"(defpautaaction :name "x" :binding ""#);
+            src.push_str(b);
+            src.push_str(r#"" :effect approve :gate binding)"#);
+            assert!(
+                Catalog::from_source(&src).is_ok(),
+                "`{b}` is a real key name and must be accepted"
+            );
+        }
+    }
 
     #[test]
     fn a_duplicate_binding_is_rejected() {

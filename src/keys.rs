@@ -53,6 +53,84 @@ mod tests {
         Catalog::load().expect("the shipped vocabulary must compile")
     }
 
+    /// Every authored binding must be something a keyboard can actually
+    /// produce.
+    ///
+    /// `pauta-spec` rejects the SHAPES that obviously cannot fire (a modifier
+    /// chord, an uppercase name, a multi-key sequence), but it deliberately
+    /// does not enumerate egaku's key-name vocabulary — that list lives in
+    /// `egaku_term` and a second copy in a spec crate that cannot see the
+    /// first is exactly the drift worth avoiding. This is the exhaustive half,
+    /// placed here because this is where egaku IS visible.
+    ///
+    /// It does not mirror the vocabulary either. It drives real `KeyEvent`s
+    /// through the REAL delivery function the runtime uses, collects what
+    /// comes out, and asserts every authored binding is in that set. So the
+    /// test stays correct when `egaku_term` adds or renames a key — there is
+    /// nothing here to update.
+    ///
+    /// This is what catches the case shape-checking cannot: a plausible
+    /// spelling that is simply the wrong word. `"escape"` and `"return"` are
+    /// the fleet atlas's canonical names (`ishou_tokens::FleetKeybinds`), and
+    /// egaku delivers `"esc"` and `"enter"` — so copying a chord straight off
+    /// the atlas into this catalog produces a key that never fires.
+    #[test]
+    fn every_authored_binding_is_reachable_by_a_real_keypress() {
+        use egaku_term::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        // Every bare keypress a terminal can deliver. No modifiers: a
+        // `:binding` is a bare key name by construction.
+        let mut codes: Vec<KeyCode> = Vec::new();
+        for c in "abcdefghijklmnopqrstuvwxyz0123456789/?-=[];',.`\\".chars() {
+            codes.push(KeyCode::Char(c));
+        }
+        codes.extend([
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Backspace,
+            KeyCode::Delete,
+            KeyCode::Insert,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Right,
+        ]);
+        for n in 1..=12u8 {
+            codes.push(KeyCode::F(n));
+        }
+
+        let reachable: Vec<KeyCombo> = codes
+            .into_iter()
+            .filter_map(|code| {
+                egaku_term::event::from_key_event(&KeyEvent::new(code, KeyModifiers::NONE))
+            })
+            .collect();
+
+        // Non-vacuity: if the delivery function stopped answering, every
+        // assertion below would pass against an empty set.
+        assert!(
+            reachable.len() > 50,
+            "only {} reachable combos — the probe itself is broken",
+            reachable.len()
+        );
+
+        for a in catalog().actions() {
+            let authored = KeyCombo::key(&a.binding);
+            assert!(
+                reachable.contains(&authored),
+                "action `{}` binds `{}`, which no keypress delivers — it would never fire",
+                a.name,
+                a.binding
+            );
+        }
+    }
+
     #[test]
     fn every_authored_action_reaches_the_keymap() {
         let c = catalog();
