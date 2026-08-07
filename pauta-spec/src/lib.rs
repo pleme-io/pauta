@@ -139,7 +139,7 @@ impl Catalog {
             return Err(SpecError::Invalid("the catalog declares no actions".into()));
         }
         for a in &actions {
-            validate_binding(&a.name, &a.binding)?;
+            parse_binding(&a.name, &a.binding)?;
         }
         dup_check(actions.iter().map(|a| a.name.as_str()), "name")?;
         dup_check(actions.iter().map(|a| a.binding.as_str()), "binding")?;
@@ -161,6 +161,32 @@ impl Catalog {
         &self.actions
     }
 
+    /// Every action as `(typed chord, effect)`, in authored order.
+    ///
+    /// The accessor a keymap builder wants: the chord has already been
+    /// parsed once, when the catalog was validated, so a consumer never
+    /// re-parses and never sees the string form. A `Catalog` that exists has
+    /// passed [`parse_binding`] on every action, which is why this can be
+    /// infallible.
+    #[must_use]
+    pub fn chords(&self) -> Vec<(awase::Hotkey, Effect)> {
+        self.actions
+            .iter()
+            .map(|a| {
+                (
+                    // Infallible: `from_source` parsed every binding before
+                    // constructing the catalog, and there is no other
+                    // constructor. The fallback is unreachable and exists so
+                    // this accessor cannot panic on a future code path that
+                    // forgets that invariant.
+                    parse_binding(&a.name, &a.binding)
+                        .unwrap_or_else(|_| awase::Hotkey::new(awase::Modifiers::NONE, awase::Key::F20)),
+                    a.effect,
+                )
+            })
+            .collect()
+    }
+
     /// The action bound to `chord`, if any.
     #[must_use]
     pub fn by_binding(&self, chord: &str) -> Option<&ActionSpec> {
@@ -177,64 +203,44 @@ impl Catalog {
     }
 }
 
-/// Reject a `:binding` that cannot possibly reach the runtime.
+/// Parse a `:binding` into a typed chord, refusing anything unspellable.
 ///
-/// `keys::keymap` builds each entry with `egaku::KeyCombo::key(&binding)`,
-/// which stores the string as a **literal key name** and parses nothing. So a
-/// binding that is not exactly what `egaku_term` delivers for some keypress
-/// compiles, passes every duplicate check below, and then simply never fires.
-/// The failure mode is silence — no error, no log, just a dead key — which is
-/// the worst shape a config error can take.
+/// # What this replaced, and why parsing is strictly stronger
 ///
-/// Three ways to author one, all rejected here:
+/// This was four hand-rolled SHAPE checks (no `+`, no whitespace, no
+/// uppercase, non-empty). They existed because `keys::keymap` built each
+/// entry with `egaku::KeyCombo::key(&binding)`, which stores the string as a
+/// **literal key name** and parses nothing — so `:binding "ctrl+s"` compiled,
+/// passed every duplicate check, and then simply never fired. Silence is the
+/// worst shape a config error can take.
 ///
-/// - **A modifier chord.** `"ctrl+s"` is one 6-character key name to
-///   `KeyCombo::key`, and no keypress is ever named that. Modified chords
-///   need `KeyCombo::new("s", vec!["ctrl".into()])`, which `:binding` has no
-///   way to express — so authoring one is always a mistake, not a feature
-///   this rejects.
-/// - **An uppercase letter.** `egaku_term` lowercases every character key and
-///   conveys the case as a `shift` modifier, so `"S"` is never delivered.
-/// - **Whitespace.** A two-key sequence (`"C-x e"`) is a chord, not a key
-///   name; `KeyMap` has no notion of a pending prefix.
+/// `awase::Hotkey::parse` subsumes all four and catches one they structurally
+/// could not: an unknown key **name**. `:binding "excape"` has the right
+/// shape — lowercase, no modifier, no whitespace — and is still a dead key.
+/// A shape check cannot see that; only the vocabulary can, and the vocabulary
+/// lives in awase.
 ///
-/// This is a SHAPE check, deliberately not a vocabulary check. Enumerating
-/// every name `egaku_term` emits would put a second copy of that list here,
-/// in a crate that (by design — three dependencies) cannot see the first. The
-/// exhaustive check lives where egaku IS visible: `keys.rs`'s
-/// `every_authored_binding_is_reachable_by_a_real_keypress`, which drives real
-/// `KeyEvent`s through `egaku_term::event::from_key_event` and asserts each
-/// authored binding is something a keyboard can actually produce.
-fn validate_binding(name: &str, binding: &str) -> Result<(), SpecError> {
-    let bad = |why: &str| {
+/// # It also LIFTS a restriction
+///
+/// The old checks banned modifier chords because `KeyCombo::key` could not
+/// express one. That constraint belonged to the string dispatch path, not to
+/// pauta: `egaku_term` now delivers `awase::Hotkey`, so `:binding "ctrl+s"`
+/// is an ordinary chord. A rule that only existed to work around a
+/// representation is gone with the representation.
+///
+/// Deliverability — can a terminal actually PRODUCE this chord — is still a
+/// separate question, and still checked where egaku is visible:
+/// `keys.rs`'s `every_authored_binding_is_reachable_by_a_real_keypress`.
+fn parse_binding(name: &str, binding: &str) -> Result<awase::Hotkey, SpecError> {
+    awase::Hotkey::parse(binding).map_err(|e| {
         let mut m = String::from("action `");
         m.push_str(name);
-        m.push_str("` has an unreachable binding `");
+        m.push_str("` has an unparseable binding `");
         m.push_str(binding);
         m.push_str("`: ");
-        m.push_str(why);
-        Err(SpecError::Invalid(m))
-    };
-
-    if binding.is_empty() {
-        return bad("a binding cannot be empty");
-    }
-    if binding.contains('+') {
-        return bad(
-            "modifier chords are not expressible — `KeyCombo::key` takes a literal key name, \
-             so this would never match a keypress",
-        );
-    }
-    if binding.chars().any(char::is_whitespace) {
-        return bad("multi-key sequences are not supported — one key name per action");
-    }
-    if binding.chars().any(|c| c.is_ascii_uppercase()) {
-        return bad(
-            "key names are delivered lowercase (case arrives as a `shift` modifier), \
-             so an uppercase name never matches",
-        );
-    }
-    Ok(())
+        let _ = std::fmt::Write::write_fmt(&mut m, format_args!("{e}"));
+        SpecError::Invalid(m)
+    })
 }
 
 fn dup_check<'a>(it: impl Iterator<Item = &'a str>, what: &str) -> Result<(), SpecError> {
@@ -305,47 +311,77 @@ mod tests {
 
     // ── The gates, each shown red on a deliberately-broken catalog ──
 
+    /// The landmine this validation exists for — now caught by PARSING.
+    ///
+    /// `:binding "excape"` has the right shape (lowercase, no modifier, no
+    /// whitespace) and is still a dead key. The four hand-rolled shape checks
+    /// this replaced could not see that; only the key vocabulary can, and it
+    /// lives in awase.
     #[test]
-    /// The landmine this validation exists for. Before it, this catalog
-    /// compiled, passed all three duplicate checks, and shipped a key that
-    /// silently never fired — `KeyCombo::key("ctrl+s")` is a literal
-    /// 6-character key name and no keypress is ever called that.
+    fn an_unknown_key_name_is_rejected() {
+        let src = r#"
+(defpautaaction :name "close" :binding "excape" :effect quit :gate free)
+"#;
+        let e = Catalog::from_source(src).unwrap_err();
+        assert!(
+            matches!(&e, SpecError::Invalid(m) if m.contains("excape")),
+            "an unknown key name must be refused by name; got {e:?}"
+        );
+    }
+
+    /// **LIFTED, deliberately.** A modifier chord used to be rejected because
+    /// `KeyCombo::key` could not express one — a limit of the string dispatch
+    /// path, not of pauta. `egaku_term` now delivers `awase::Hotkey`, so this
+    /// is an ordinary chord and the old rule went away with the thing it
+    /// worked around.
     #[test]
-    fn a_modifier_chord_is_rejected_because_it_could_never_fire() {
+    fn a_modifier_chord_is_now_an_ordinary_binding() {
         let src = r#"
 (defpautaaction :name "stage" :binding "ctrl+s" :effect approve :gate binding)
 "#;
-        let e = Catalog::from_source(src).unwrap_err();
-        assert!(
-            matches!(&e, SpecError::Invalid(m) if m.contains("ctrl+s") && m.contains("modifier")),
-            "a modifier chord is unreachable through KeyCombo::key; got {e:?}"
+        let c = Catalog::from_source(src).expect("a modifier chord is expressible now");
+        let (chord, _) = c.chords()[0];
+        assert_eq!(
+            chord,
+            awase::Hotkey::new(awase::Modifiers::CTRL, awase::Key::S)
         );
     }
 
-    #[test]
-    fn an_uppercase_binding_is_rejected() {
-        // egaku_term lowercases character keys and conveys case as a `shift`
-        // modifier, so "S" is delivered as ("s", [shift]) and an authored "S"
-        // never matches.
-        let src = r#"
-(defpautaaction :name "stage" :binding "S" :effect approve :gate binding)
-"#;
-        let e = Catalog::from_source(src).unwrap_err();
-        assert!(
-            matches!(&e, SpecError::Invalid(m) if m.contains("lowercase")),
-            "an uppercase key name is never delivered; got {e:?}"
-        );
-    }
-
+    /// A multi-key SEQUENCE is still refused — `KeyMode` indexes single
+    /// chords, and there is no pending-prefix state for a follower key.
     #[test]
     fn a_multi_key_sequence_is_rejected() {
         let src = r#"
 (defpautaaction :name "stage" :binding "C-x e" :effect approve :gate binding)
 "#;
         let e = Catalog::from_source(src).unwrap_err();
-        assert!(
-            matches!(&e, SpecError::Invalid(m) if m.contains("multi-key")),
-            "KeyMap has no pending-prefix state; got {e:?}"
+        assert!(matches!(&e, SpecError::Invalid(_)), "got {e:?}");
+    }
+
+    /// **A HAZARD, pinned rather than fixed.** `Hotkey::parse` is
+    /// case-insensitive, so `"S"` yields `Key::S` with NO shift — the same
+    /// chord as `"s"`. An author writing `"S"` meaning shift+s gets a silent
+    /// collision with `"s"` instead of an error.
+    ///
+    /// banken hit this and documented the fix at the failure site
+    /// (`ActionChord::SHIFT_HINT`): author an uppercase letter as
+    /// `"shift+s"`, which is also what the terminal delivers. pauta inherits
+    /// the hazard; the duplicate check below is what actually catches it,
+    /// because the two spellings collapse to one chord.
+    #[test]
+    fn an_uppercase_letter_is_the_same_chord_as_its_lowercase() {
+        let upper = Catalog::from_source(
+            r#"(defpautaaction :name "x" :binding "S" :effect approve :gate binding)"#,
+        )
+        .expect("parses");
+        let lower = Catalog::from_source(
+            r#"(defpautaaction :name "x" :binding "s" :effect approve :gate binding)"#,
+        )
+        .expect("parses");
+        assert_eq!(
+            upper.chords()[0].0,
+            lower.chords()[0].0,
+            "`S` and `s` are ONE chord — author shift+s for the shifted one"
         );
     }
 
@@ -358,18 +394,19 @@ mod tests {
         assert!(matches!(&e, SpecError::Invalid(_)), "got {e:?}");
     }
 
-    /// Non-vacuity: the rejections above must not be rejecting everything.
-    /// The canonical catalog — and every ordinary key shape — still loads.
+    /// Non-vacuity: the refusals above must not be rejecting everything.
     #[test]
     fn ordinary_bindings_still_pass_validation() {
         assert!(Catalog::load().is_ok(), "the canonical catalog must load");
-        for b in ["j", "enter", "esc", "tab", "/", "?", "f1", "1", "-"] {
+        for b in [
+            "j", "enter", "esc", "tab", "/", "?", "f1", "1", "-", "ctrl+s", "shift+s",
+        ] {
             let mut src = String::from(r#"(defpautaaction :name "x" :binding ""#);
             src.push_str(b);
             src.push_str(r#"" :effect approve :gate binding)"#);
             assert!(
                 Catalog::from_source(&src).is_ok(),
-                "`{b}` is a real key name and must be accepted"
+                "`{b}` is a real chord and must be accepted"
             );
         }
     }

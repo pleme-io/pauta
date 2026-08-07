@@ -46,6 +46,7 @@ pauta-spec = { path = "pauta-spec", version = "0.1" }
 metsuke = "0.1"
 # Widget STATE (TableView, DiffView, TextArea, KeyMap) — named directly
 # because pauta uses the models far more than the renderer's re-exports.
+awase = "0.1"
 egaku = "0.1"
 # The cell renderer + AsyncApp runtime. A plain version now: egaku-term
 # 0.3.6 is on crates.io, carrying `AsyncApp::wake`/`on_wake` — the arm the

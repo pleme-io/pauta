@@ -54,8 +54,20 @@ where
 {
     type Action = Action;
 
+    /// Vestigial: pauta dispatches through [`Self::hotkey_map`].
+    ///
+    /// `AsyncApp::keymap` is still a required method, so this returns a
+    /// permanently-empty map that the runtime never consults — it prefers the
+    /// typed path whenever `hotkey_map` is `Some`. A static, so the empty map
+    /// costs the struct nothing. Removing it is a breaking `egaku-term 0.4`.
     fn keymap(&self) -> &KeyMap<Self::Action> {
-        self.app.keymap()
+        static EMPTY: std::sync::OnceLock<KeyMap<Action>> = std::sync::OnceLock::new();
+        EMPTY.get_or_init(KeyMap::new)
+    }
+
+    /// The typed keymap — pauta's real dispatch source.
+    fn hotkey_map(&self) -> Option<&awase::KeyMode<Self::Action>> {
+        Some(self.app.keymap())
     }
 
     async fn handle(&mut self, action: &Self::Action) -> TermResult<()> {

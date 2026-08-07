@@ -19,6 +19,11 @@ missing_panics_doc = "allow"
 # ONE dep, not two: the derive macros arrive RENAMED through
 # `tatara_lisp::DeriveTataraDomain`, so `tatara-lisp-derive` is never named
 # here (banken's manifest makes the same point).
+# The typed chord vocabulary. `:binding` is VALIDATED BY PARSING through
+# `awase::Hotkey::parse` rather than by hand-rolled shape checks — parsing
+# is strictly stronger (it also rejects an unknown key NAME, which a shape
+# check cannot see) and it is the same vocabulary the runtime delivers in.
+awase = "0.1"
 tatara-lisp = "0.3.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

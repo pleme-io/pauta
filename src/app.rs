@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use egaku::{DiffView, KeyMap};
+use egaku::DiffView;
 use metsuke::{Forge, ForgeReview, Involvement, PrSummary, Verdict};
 use pauta_spec::{Catalog, Effect};
 
@@ -48,7 +48,7 @@ pub struct PautaApp<F: Forge, R: ForgeReview> {
     board: Board,
     panel: Panel,
     catalog: Catalog,
-    keys: KeyMap<Effect>,
+    keys: awase::KeyMode<Effect>,
     done: bool,
     feed: Option<PrFeed>,
     /// A short label naming where the rows came from — tier honesty in the UI
@@ -128,7 +128,7 @@ impl<F: Forge, R: ForgeReview> PautaApp<F, R> {
     }
 
     #[must_use]
-    pub fn keymap(&self) -> &KeyMap<Effect> {
+    pub fn keymap(&self) -> &awase::KeyMode<Effect> {
         &self.keys
     }
 

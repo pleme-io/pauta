@@ -10,15 +10,34 @@
 //! Now `pauta-spec`'s `(defpautaaction)` catalog is the single source, and
 //! the keymap, the legend and the gate all read from it.
 
-use egaku::{KeyCombo, KeyMap};
 use pauta_spec::{Catalog, Effect, Gate};
 
 /// Build the keymap from the authored catalog.
+///
+/// Typed end to end: the catalog hands over `awase::Hotkey` values it parsed
+/// at validation time, and `egaku_term` delivers the same type, so there is
+/// no projection between the authored chord and the delivered one — and
+/// therefore no place for the two to disagree.
+///
+/// # Panics
+///
+/// If two actions bind the same chord. That is unreachable through
+/// [`Catalog::from_source`], which rejects a duplicate `:binding` before a
+/// `Catalog` can exist; this is a second, independent guard on the same
+/// invariant rather than a real error path. Panicking beats `try_bind`'s
+/// silent alternative — a displaced binding nothing reports.
 #[must_use]
-pub fn keymap(catalog: &Catalog) -> KeyMap<Effect> {
-    let mut m = KeyMap::new();
-    for a in catalog.actions() {
-        m.bind(KeyCombo::key(&a.binding), a.effect);
+pub fn keymap(catalog: &Catalog) -> awase::KeyMode<Effect> {
+    let mut m: awase::KeyMode<Effect> = awase::KeyMode::typed("default", false);
+    for (chord, effect) in catalog.chords() {
+        m.try_bind(awase::Binding::new(chord, effect))
+            .unwrap_or_else(|displaced| {
+                panic!(
+                    "two actions bind `{chord}` ({:?} and {effect:?}) — the catalog's \
+                     duplicate check should have refused this",
+                    displaced.action
+                )
+            });
     }
     m
 }
@@ -56,79 +75,21 @@ mod tests {
     /// Every authored binding must be something a keyboard can actually
     /// produce.
     ///
-    /// `pauta-spec` rejects the SHAPES that obviously cannot fire (a modifier
-    /// chord, an uppercase name, a multi-key sequence), but it deliberately
-    /// does not enumerate egaku's key-name vocabulary — that list lives in
-    /// `egaku_term` and a second copy in a spec crate that cannot see the
-    /// first is exactly the drift worth avoiding. This is the exhaustive half,
-    /// placed here because this is where egaku IS visible.
+    /// `pauta-spec` rejects what cannot be PARSED — it runs every `:binding`
+    /// through `awase::Hotkey::parse`, so an unknown key name has no typed
+    /// value. Parseable is not the same as pressable, though: `f20` and
+    /// `volumeup` are both real awase keys that no terminal delivers. This is
+    /// that second question.
     ///
-    /// It does not mirror the vocabulary either. It drives real `KeyEvent`s
-    /// through the REAL delivery function the runtime uses, collects what
-    /// comes out, and asserts every authored binding is in that set. So the
-    /// test stays correct when `egaku_term` adds or renames a key — there is
-    /// nothing here to update.
-    ///
-    /// This is what catches the case shape-checking cannot: a plausible
-    /// spelling that is simply the wrong word. `"escape"` and `"return"` are
-    /// the fleet atlas's canonical names (`ishou_tokens::FleetKeybinds`), and
-    /// egaku delivers `"esc"` and `"enter"` — so copying a chord straight off
-    /// the atlas into this catalog produces a key that never fires.
+    /// It used to be ~30 lines of hand-rolled probe here. `egaku_term` now
+    /// ships it (`event::testing`), so this is one call — and the shared
+    /// probe still mirrors no vocabulary: it drives synthetic events through
+    /// the REAL delivery function, so there is nothing to update when a key
+    /// is added. Its non-vacuity floor lives inside it.
     #[test]
     fn every_authored_binding_is_reachable_by_a_real_keypress() {
-        use egaku_term::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-        // Every bare keypress a terminal can deliver. No modifiers: a
-        // `:binding` is a bare key name by construction.
-        let mut codes: Vec<KeyCode> = Vec::new();
-        for c in "abcdefghijklmnopqrstuvwxyz0123456789/?-=[];',.`\\".chars() {
-            codes.push(KeyCode::Char(c));
-        }
-        codes.extend([
-            KeyCode::Enter,
-            KeyCode::Esc,
-            KeyCode::Tab,
-            KeyCode::BackTab,
-            KeyCode::Backspace,
-            KeyCode::Delete,
-            KeyCode::Insert,
-            KeyCode::Home,
-            KeyCode::End,
-            KeyCode::PageUp,
-            KeyCode::PageDown,
-            KeyCode::Up,
-            KeyCode::Down,
-            KeyCode::Left,
-            KeyCode::Right,
-        ]);
-        for n in 1..=12u8 {
-            codes.push(KeyCode::F(n));
-        }
-
-        let reachable: Vec<KeyCombo> = codes
-            .into_iter()
-            .filter_map(|code| {
-                egaku_term::event::from_key_event(&KeyEvent::new(code, KeyModifiers::NONE))
-            })
-            .collect();
-
-        // Non-vacuity: if the delivery function stopped answering, every
-        // assertion below would pass against an empty set.
-        assert!(
-            reachable.len() > 50,
-            "only {} reachable combos — the probe itself is broken",
-            reachable.len()
-        );
-
-        for a in catalog().actions() {
-            let authored = KeyCombo::key(&a.binding);
-            assert!(
-                reachable.contains(&authored),
-                "action `{}` binds `{}`, which no keypress delivers — it would never fire",
-                a.name,
-                a.binding
-            );
-        }
+        let chords: Vec<awase::Hotkey> = catalog().chords().into_iter().map(|(c, _)| c).collect();
+        egaku_term::event::testing::assert_all_deliverable(&chords);
     }
 
     #[test]
@@ -140,12 +101,12 @@ mod tests {
             c.actions().len(),
             "a chord was swallowed between the catalog and the keymap"
         );
-        for a in c.actions() {
+        for (chord, effect) in c.chords() {
             assert_eq!(
-                m.lookup(&KeyCombo::key(&a.binding)),
-                Some(&a.effect),
-                "chord `{}` did not resolve to its authored effect",
-                a.binding
+                m.find_binding(&chord, &awase::MatchContext::default())
+                    .map(|b| b.action),
+                Some(effect),
+                "chord `{chord}` did not resolve to its authored effect"
             );
         }
     }
