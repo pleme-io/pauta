@@ -26,7 +26,7 @@ members = ["pauta-spec"]
 # `workspace.package.version not found` and `ship` never runs — pauta's
 # first two releases failed exactly there. Same shape as banken and tear.
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.89.0"
 license = "MIT"
