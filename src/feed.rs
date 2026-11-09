@@ -6,7 +6,7 @@
 //! there was no non-input path into the runtime loop, and the table was
 //! frozen against a live cluster.
 //!
-//! Two rules, both load-bearing (see `theory/QUADRO.md` §T14):
+//! Two rules, both load-bearing:
 //!
 //! 1. **The read never runs on the app task.** `Forge::search` is a `gh`
 //!    subprocess and an HTTPS round trip. On the task that owns the terminal
